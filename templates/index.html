@@ -119,12 +119,23 @@
       $("#grid").html(gridHtml);
     }
 
+    function parseKey(key) {
+      // Matches strings like "((0, 0), 'up')"
+      const regex = /^\(\((.+),\s*(.+)\),\s*'(.+)'\)$/;
+      const matches = key.match(regex);
+      if (matches) {
+        return { state: `(${matches[1]}, ${matches[2]})`, action: matches[3] };
+      } else {
+        // Fallback if the key doesn't match the expected format
+        return { state: key, action: "" };
+      }
+    }
+
     function renderQTable(q_table) {
       let tableHtml = "<table class='qtable'><tr><th>State</th><th>Action</th><th>Q-Value</th></tr>";
       for (let key in q_table) {
-        // Key is a string of the form "((x, y), 'action')"
-        // We can simply display the full key here for clarity.
-        tableHtml += `<tr><td>${key.split(",")[0]}</td><td>${key.split(",")[1]}</td><td>${parseFloat(q_table[key]).toFixed(2)}</td></tr>`;
+        const parsed = parseKey(key);
+        tableHtml += `<tr><td>${parsed.state}</td><td>${parsed.action}</td><td>${parseFloat(q_table[key]).toFixed(2)}</td></tr>`;
       }
       tableHtml += "</table>";
       $("#q-table").html(tableHtml);
