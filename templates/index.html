@@ -7,16 +7,37 @@
     body {
       font-family: Arial, sans-serif;
       background: #f5f5f5;
+      margin: 0;
+      padding: 0;
     }
     h1 {
       text-align: center;
+      margin-top: 20px;
+    }
+    #container {
+      display: flex;
+      justify-content: space-around;
+      align-items: flex-start;
+      padding: 20px;
+    }
+    #left-panel {
+      flex: 1;
+      max-width: 300px;
+      margin-right: 20px;
+    }
+    #right-panel {
+      flex: 1;
+      max-width: 600px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
     }
     #grid {
-      margin: 20px auto;
-      width: fit-content;
+      margin: 0 auto;
     }
     table {
       border-collapse: collapse;
+      margin: 0 auto;
     }
     td {
       width: 50px;
@@ -42,23 +63,17 @@
     }
     button {
       padding: 10px 20px;
-      margin: 10px;
+      margin: 5px;
       font-size: 16px;
     }
-    #metrics {
-      margin: 20px auto;
-      width: fit-content;
-      padding: 10px;
+    #metrics, #controls, #q-table-container {
       background: #fff;
       border: 1px solid #ccc;
+      padding: 10px;
     }
     #q-table-container {
-      margin: 20px auto;
-      width: 90%;
-      max-width: 600px;
-      background: #fff;
-      border: 1px solid #ccc;
-      overflow-x: auto;
+      height: 300px;
+      overflow-y: auto;
     }
     table.qtable {
       width: 100%;
@@ -69,22 +84,54 @@
       padding: 5px;
       text-align: center;
     }
+    #controls label {
+      display: block;
+      margin: 5px 0;
+    }
+    #controls input, #controls select {
+      width: 100%;
+      padding: 5px;
+      margin-bottom: 10px;
+    }
   </style>
 </head>
 <body>
   <h1>GridWorld Q-Learning Demo</h1>
-  <div id="grid"></div>
-  <br>
-  <button id="step-btn">Step</button>
-  <button id="reset-btn">Reset</button>
-  <p id="info"></p>
-  <div id="metrics">
-    <h3>Performance Metrics</h3>
-    <p id="performance"></p>
-  </div>
-  <div id="q-table-container">
-    <h3>Q-Table</h3>
-    <div id="q-table"></div>
+  <div id="container">
+    <div id="left-panel">
+      <div id="grid"></div>
+      <div style="text-align:center;">
+        <button id="step-btn">Step</button>
+        <button id="reset-btn">Reset</button>
+      </div>
+      <p id="info" style="text-align:center;"></p>
+    </div>
+    <div id="right-panel">
+      <div id="metrics">
+        <h3>Performance Metrics</h3>
+        <p id="performance"></p>
+      </div>
+      <div id="q-table-container">
+        <h3>Q-Table</h3>
+        <div id="q-table"></div>
+      </div>
+      <div id="controls">
+        <h3>Learning Parameters</h3>
+        <label for="learning_rate">Learning Rate:</label>
+        <input type="number" step="0.01" id="learning_rate" value="0.1">
+        <label for="discount_factor">Discount Factor:</label>
+        <input type="number" step="0.01" id="discount_factor" value="0.95">
+        <label for="epsilon">Epsilon (Exploration Rate):</label>
+        <input type="number" step="0.01" id="epsilon" value="0.2">
+        <button id="update-params-btn">Update Parameters</button>
+        <h3>Environment Mode</h3>
+        <label for="env_mode">Select Mode:</label>
+        <select id="env_mode">
+          <option value="simple">Simple</option>
+          <option value="complex">Complex</option>
+        </select>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -92,6 +139,7 @@
     let obstacles = [];
     let cumulativeReward = 0;
     let stepCount = 0;
+    let autoStepInterval;
 
     function renderGrid(state) {
       let gridHtml = "<table>";
@@ -100,12 +148,12 @@
         for (let j = 0; j < GRID_SIZE; j++) {
           let cell = "";
           let cellClass = "";
-          // Agent takes precedence
+          // Agent takes precedence over other markers
           if (i === state[0] && j === state[1]) {
             cell = "A";
             cellClass = "agent";
           } else if (i === GRID_SIZE - 1 && j === GRID_SIZE - 1) {
-            cell = "G"; // Goal position
+            cell = "G";
             cellClass = "goal";
           } else if (obstacles.some(o => o[0] === i && o[1] === j)) {
             cell = "X";
@@ -119,14 +167,13 @@
       $("#grid").html(gridHtml);
     }
 
+    // Use regex parsing to extract state and action from Q-table keys.
     function parseKey(key) {
-      // Matches strings like "((0, 0), 'up')"
       const regex = /^\(\((.+),\s*(.+)\),\s*'(.+)'\)$/;
       const matches = key.match(regex);
       if (matches) {
         return { state: `(${matches[1]}, ${matches[2]})`, action: matches[3] };
       } else {
-        // Fallback if the key doesn't match the expected format
         return { state: key, action: "" };
       }
     }
@@ -141,38 +188,73 @@
       $("#q-table").html(tableHtml);
     }
 
-    // Reset the grid on page load
-    $.post("/reset", function(data) {
-      renderGrid(data.state);
-      obstacles = data.obstacles;
-      cumulativeReward = 0;
-      stepCount = 0;
+    function updatePerformance() {
       $("#performance").text(`Steps: ${stepCount}, Cumulative Reward: ${cumulativeReward}`);
-    });
+    }
 
-    $("#step-btn").click(function() {
+    function doStep() {
       $.post("/step", function(data) {
         renderGrid(data.state);
         stepCount++;
         cumulativeReward += data.reward;
         $("#info").text(`Action: ${data.action} | Reward: ${data.reward} | Done: ${data.done}`);
-        $("#performance").text(`Steps: ${stepCount}, Cumulative Reward: ${cumulativeReward}`);
+        updatePerformance();
         renderQTable(data.q_table);
         if (data.done) {
           $("#info").append(" - Goal reached! Reset to start over.");
         }
       });
-    });
+    }
 
-    $("#reset-btn").click(function() {
-      $.post("/reset", function(data) {
-        renderGrid(data.state);
-        obstacles = data.obstacles;
-        cumulativeReward = 0;
-        stepCount = 0;
-        $("#info").text("Environment reset.");
-        $("#performance").text(`Steps: ${stepCount}, Cumulative Reward: ${cumulativeReward}`);
-        $("#q-table").html("");
+    function resetEnvironment() {
+      const mode = $("#env_mode").val();
+      $.ajax({
+        url: "/reset",
+        type: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({ mode: mode }),
+        success: function(data) {
+          renderGrid(data.state);
+          obstacles = data.obstacles;
+          stepCount = 0;
+          cumulativeReward = 0;
+          updatePerformance();
+          $("#info").text("Environment reset.");
+          $("#q-table").html("");
+        }
+      });
+    }
+
+    $(document).ready(function() {
+      resetEnvironment();
+      // Start automatic stepping every second.
+      autoStepInterval = setInterval(doStep, 1000);
+
+      $("#step-btn").click(function() {
+        doStep();
+      });
+
+      $("#reset-btn").click(function() {
+        resetEnvironment();
+      });
+
+      $("#update-params-btn").click(function() {
+        const learning_rate = $("#learning_rate").val();
+        const discount_factor = $("#discount_factor").val();
+        const epsilon = $("#epsilon").val();
+        $.ajax({
+          url: "/update_params",
+          type: "POST",
+          contentType: "application/json",
+          data: JSON.stringify({ learning_rate, discount_factor, epsilon }),
+          success: function(data) {
+            if (data.status === "success") {
+              alert("Parameters updated successfully.");
+            } else {
+              alert("Error updating parameters: " + data.message);
+            }
+          }
+        });
       });
     });
   </script>
