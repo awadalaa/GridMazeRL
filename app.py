@@ -7,12 +7,14 @@ app = Flask(__name__)
 GRID_SIZE = 5
 ACTIONS = ['up', 'down', 'left', 'right']
 
-# GridWorld environment
+# GridWorld environment with obstacles
 class GridWorld:
     def __init__(self, grid_size=GRID_SIZE):
         self.grid_size = grid_size
         self.start = (0, 0)
         self.goal = (grid_size - 1, grid_size - 1)
+        # Define obstacles: ensure they don't cover start or goal
+        self.obstacles = [(1, 1), (1, 2), (2, 3)]
         self.state = self.start
 
     def reset(self):
@@ -32,14 +34,18 @@ class GridWorld:
         else:
             new_state = self.state
 
-        # Set a default small penalty for each move
-        reward = -1
-        done = False
-
-        # Check if goal is reached
-        if new_state == self.goal:
-            reward = 10  # Reward for reaching the goal
-            done = True
+        # If the new state is an obstacle, remain in place and penalize heavily
+        if new_state in self.obstacles:
+            reward = -5
+            new_state = self.state
+            done = False
+        else:
+            reward = -1  # Default penalty for each move
+            done = False
+            # Check if goal is reached
+            if new_state == self.goal:
+                reward = 10  # Reward for reaching the goal
+                done = True
 
         self.state = new_state
         return new_state, reward, done
@@ -57,13 +63,12 @@ class QLearningAgent:
         return self.q_table.get((state, action), 0.0)
 
     def choose_action(self, state):
-        # ε-greedy strategy: explore with probability ε, else choose best known action.
+        # ε-greedy strategy: explore with probability ε, else choose the best known action.
         if random.random() < self.epsilon:
             return random.choice(self.actions)
         else:
             q_values = [self.get_q(state, a) for a in self.actions]
             max_q = max(q_values)
-            # In case of ties, randomly choose among best actions.
             best_actions = [a for a, q in zip(self.actions, q_values) if q == max_q]
             return random.choice(best_actions)
 
@@ -87,7 +92,7 @@ def index():
 @app.route('/reset', methods=['POST'])
 def reset():
     state = env.reset()
-    return jsonify({'state': state})
+    return jsonify({'state': state, 'obstacles': env.obstacles})
 
 @app.route('/step', methods=['POST'])
 def step():
@@ -100,10 +105,8 @@ def step():
         'action': action,
         'reward': reward,
         'done': done,
-        # For debugging: you can view the Q-table updates
         'q_table': {str(k): v for k, v in agent.q_table.items()}
     })
 
 if __name__ == '__main__':
     app.run(debug=True)
-
